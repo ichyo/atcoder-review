@@ -1,0 +1,7 @@
+[package]
+name = "atcoder-review"
+version = "0.1.0"
+authors = ["ichyo <ichyo00@gmail.com>"]
+
+[dependencies]
+atcoder-client = { git = "https://github.com/ichyo/atcoder-client" }
