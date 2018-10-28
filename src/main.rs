@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::env;
 
 fn solved(s: &StandingsData, task_id: &str) -> bool {
+    // TODO: Determine if full solved or partially solved with maximum points
     if let Some(t) = s.result(task_id) {
         t.score > 0
     } else {
