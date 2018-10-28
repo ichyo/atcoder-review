@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "atcoder-client"
 version = "0.1.0"
-source = "git+https://github.com/ichyo/atcoder-client#7b9dddf351403f1e1e45695c7f7d40f5a69e6430"
+source = "git+https://github.com/ichyo/atcoder-client#2d96e5e01a45793105ee90a5cfc66d9568b0d93e"
 dependencies = [
  "reqwest 0.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
