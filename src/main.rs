@@ -1,89 +1,79 @@
 extern crate atcoder_client;
 
 use atcoder_client::contests::{get_standings, Standings, StandingsData};
-use atcoder_client::users::get_history;
-use std::collections::HashSet;
+use atcoder_client::users::{get_history, Competition};
 use std::env;
 
-fn solved(s: &StandingsData, task_id: &str) -> bool {
-    if let Some(t) = s.result(task_id) {
-        t.is_solved()
-    } else {
-        false
-    }
-}
+struct User(Vec<Competition>);
+struct Contest(String, Standings);
+struct UserResult<'a>(&'a StandingsData);
 
-fn get_rated_contest_ids(user_id: &str) -> Vec<String> {
-    let user = get_history(user_id).unwrap();
-    user.iter()
-        .filter(|c| c.is_rated)
-        .map(|c| c.contest_id().unwrap().to_string())
-        .collect()
-}
-
-fn get_solved(user_id: &str, standings: &Standings) -> HashSet<String> {
-    let tasks = standings.task_ids();
-    let s = standings
-        .standings()
-        .iter()
-        .filter(|s| s.user_id() == user_id)
-        .next()
-        .unwrap();
-    tasks
-        .iter()
-        .filter(|t| solved(s, t))
-        .map(|t| t.to_string())
-        .collect()
-}
-
-fn get_unsolved_tasks_with_performance(
-    user_id: &str,
-    contest_id: &str,
-) -> Vec<(String, Option<i32>)> {
-    let standings = get_standings(contest_id).unwrap();
-    let solved_set = get_solved(user_id, &standings);
-
-    let tasks = standings.task_ids();
-    let mut res = Vec::new();
-    for t in tasks.iter().filter(|t| !solved_set.contains(*t)) {
-        let user = standings
-            .standings()
-            .iter()
-            .filter(|s| s.is_rated)
-            .filter(|s| solved(s, t))
-            .filter(|s| solved_set.iter().all(|t| solved(s, t)))
-            .map(|s| s.user_id())
-            .last();
-
-        let history = user.map(|u| get_history(u).unwrap());
-
-        let competition = history.and_then(|h| {
-            h.into_iter()
-                .filter(|c| c.contest_id().unwrap_or("") == contest_id)
-                .next()
-        });
-
-        let performance = competition.map(|c| c.performance);
-
-        res.push((t.to_string(), performance));
-    }
-
-    res
-}
-
-fn get_review_tasks(user_id: &str) -> Vec<(String, String, i32)> {
-    let contest_ids = get_rated_contest_ids(&user_id);
-    let mut res = Vec::new();
-    for contest_id in contest_ids {
-        eprintln!("{}", contest_id);
-        for (t, p) in get_unsolved_tasks_with_performance(user_id, &contest_id) {
-            if let Some(p) = p {
-                res.push((contest_id.clone(), t, p));
-            }
+impl Contest {
+    fn fetch(contest_id: &str) -> Option<Contest> {
+        match get_standings(contest_id) {
+            Ok(x) => Some(Contest(contest_id.to_string(), x)),
+            Err(_) => None,
         }
     }
-    res.sort_by_key(|(_, _, p)| *p);
-    res
+
+    fn id(&self) -> &str {
+        &self.0
+    }
+
+    fn results(&self) -> Vec<UserResult> {
+        self.1
+            .standings_data
+            .iter()
+            .map(|s| UserResult(s))
+            .collect()
+    }
+
+    fn task_ids(&self) -> Vec<String> {
+        self.1
+            .task_info
+            .iter()
+            .map(|info| info.id().to_string())
+            .collect()
+    }
+}
+
+impl User {
+    fn fetch(user_id: &str) -> Option<User> {
+        match get_history(user_id) {
+            Ok(h) => Some(User(h)),
+            Err(_) => None,
+        }
+    }
+
+    fn rated_contests(&self) -> Vec<Contest> {
+        self.0
+            .iter()
+            .filter(|p| p.is_rated)
+            .filter_map(|p| p.contest_id())
+            .filter_map(|s| Contest::fetch(s))
+            .collect::<Vec<_>>()
+    }
+}
+
+impl<'a> UserResult<'a> {
+    fn user_id(&self) -> &str {
+        &self.0.user_screen_name
+    }
+
+    fn is_rated(&self) -> bool {
+        self.0.is_rated
+    }
+
+    fn rating(&self) -> i32 {
+        self.0.old_rating
+    }
+
+    fn has_solved(&self, task_id: &str) -> bool {
+        match self.0.result(task_id) {
+            Some(r) => r.is_solved(),
+            None => false,
+        }
+    }
 }
 
 fn main() {
@@ -91,7 +81,58 @@ fn main() {
         Some(x) => x,
         None => panic!("user_id should be specified as argument"),
     };
-    for (c, t, p) in get_review_tasks(&user_id) {
-        println!("{contest} {task} {performance} https://beta.atcoder.jp/contests/{contest}/tasks/{task}", contest=c, task=t, performance=p);
+
+    // TODO: argument
+    let lower_rating = 2400;
+    let upper_rating = 2800;
+
+    let user = match User::fetch(&user_id) {
+        Some(u) => u,
+        None => panic!("unknown user id"),
+    };
+
+    let contests = user.rated_contests();
+
+    for contest in contests {
+        let task_ids = contest.task_ids();
+
+        let results = contest.results();
+        let target_results = results
+            .iter()
+            .filter(|r| r.is_rated())
+            .filter(|r| r.rating() >= lower_rating)
+            .filter(|r| r.rating() <= upper_rating)
+            .collect::<Vec<_>>();
+
+        let my_result = match results.iter().filter(|r| r.user_id() == user_id).next() {
+            Some(r) => r,
+            None => panic!("this shouldn't happen. something wrong"),
+        };
+
+        if target_results.is_empty() {
+            eprintln!("No target user found for a contest {}. Skip.", contest.id());
+            continue;
+        }
+
+        for task_id in task_ids {
+            if my_result.has_solved(&task_id) {
+                continue;
+            }
+
+            let solved_count = target_results
+                .iter()
+                .filter(|r| r.has_solved(&task_id))
+                .count();
+            let total_count = target_results.len();
+            let solved_ratio = (solved_count as f64) / (total_count as f64);
+
+            println!(
+                "{}: {} / {} ({:.2} %)",
+                task_id,
+                solved_count,
+                total_count,
+                solved_ratio * 100.0,
+            );
+        }
     }
 }
